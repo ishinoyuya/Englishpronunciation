@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BritReader">
+<meta name="robots" content="noindex">
+<title>British English Reader</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1d2330; --card:#fff; --accent:#2b5fd9; --muted:#6b7280; --border:#d7dbe3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171d; --fg:#e8eaf0; --card:#1d222b; --accent:#6c9bff; --muted:#9aa3b2; --border:#333a47; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,"Yu Gothic UI",sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:1.3rem; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  textarea { width:100%; min-height:200px; resize:vertical; padding:12px; font:inherit; font-size:1.05rem; line-height:1.6;
+    color:var(--fg); background:var(--bg); border:1px solid var(--border); border-radius:8px; }
+  #highlight { display:none; min-height:200px; padding:12px; font-size:1.05rem; line-height:1.6; white-space:pre-wrap;
+    border:1px solid var(--border); border-radius:8px; background:var(--bg); }
+  #highlight mark { background:var(--accent); color:#fff; border-radius:3px; padding:0 1px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:12px; }
+  label { font-size:.85rem; color:var(--muted); display:flex; flex-direction:column; gap:4px; flex:1 1 180px; }
+  select, input[type=range] { width:100%; }
+  select { padding:6px; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--border); border-radius:6px; }
+  button { min-height:44px; padding:10px 18px; font:inherit; font-weight:600; border:0; border-radius:8px; cursor:pointer;
+    background:var(--accent); color:#fff; }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--border); }
+  #status { margin-top:12px; font-size:.85rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🇬🇧 British English Reader</h1>
+  <div class="card">
+    <textarea id="text" placeholder="Type or paste English text here…">Good morning. It's rather a lovely day, isn't it? I'd like a cup of tea and a scone, if you please.</textarea>
+    <div id="highlight" aria-live="off"></div>
+
+    <div class="row">
+      <label>声 (en-GB)
+        <select id="voice"></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>速度 <span id="rateVal">1.0</span>
+        <input id="rate" type="range" min="0.5" max="1.5" step="0.05" value="1">
+      </label>
+      <label>音程 <span id="pitchVal">1.0</span>
+        <input id="pitch" type="range" min="0.5" max="1.5" step="0.05" value="1">
+      </label>
+    </div>
+    <div class="row">
+      <button id="play">▶ 再生</button>
+      <button id="pause" class="secondary">⏸ 一時停止</button>
+      <button id="stop" class="secondary">⏹ 停止</button>
+    </div>
+    <div id="status"></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const textEl = $("text"), hl = $("highlight"), voiceEl = $("voice"), statusEl = $("status");
+const synth = window.speechSynthesis;
+let voices = [];
+
+if (!synth) {
+  statusEl.textContent = "このブラウザは音声合成に対応していません。Edge か Chrome を使ってください。";
+}
+
+function loadVoices() {
+  voices = synth.getVoices().filter(v => v.lang.replace("_", "-").toLowerCase() === "en-gb");
+  // 高品質な Natural / Online 系の声を先頭に
+  voices.sort((a, b) => /natural|online/i.test(b.name) - /natural|online/i.test(a.name));
+  const saved = localStorage.getItem("voice");
+  voiceEl.innerHTML = "";
+  voices.forEach(v => {
+    const o = document.createElement("option");
+    o.value = v.name;
+    o.textContent = v.name + (v.localService ? "" : " (online)");
+    if (v.name === saved) o.selected = true;
+    voiceEl.appendChild(o);
+  });
+  statusEl.textContent = voices.length
+    ? `${voices.length} 件の en-GB 音声が見つかりました。`
+    : "en-GB の音声が見つかりません。Windows の「設定 > 時刻と言語 > 音声」で English (United Kingdom) を追加してください。";
+}
+if (synth) {
+  loadVoices();
+  synth.addEventListener("voiceschanged", loadVoices);
+}
+
+for (const id of ["rate", "pitch"]) {
+  $(id).addEventListener("input", () => $(id + "Val").textContent = Number($(id).value).toFixed(2).replace(/0$/, ""));
+}
+voiceEl.addEventListener("change", () => localStorage.setItem("voice", voiceEl.value));
+
+function showHighlight(text, start, len) {
+  hl.textContent = "";
+  hl.append(text.slice(0, start));
+  const m = document.createElement("mark");
+  m.textContent = text.slice(start, start + len);
+  hl.append(m, text.slice(start + len));
+}
+function endSpeech() {
+  hl.style.display = "none";
+  textEl.style.display = "";
+}
+
+$("play").addEventListener("click", () => {
+  const text = textEl.value.trim();
+  if (!text) return;
+  if (synth.paused) { synth.resume(); return; }
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const v = voices.find(v => v.name === voiceEl.value);
+  if (v) u.voice = v;
+  u.lang = "en-GB";
+  u.rate = Number($("rate").value);
+  u.pitch = Number($("pitch").value);
+  u.onstart = () => {
+    textEl.style.display = "none";
+    hl.style.display = "block";
+    hl.textContent = text;
+  };
+  u.onboundary = e => {
+    if (e.name && e.name !== "word") return;
+    const len = e.charLength || (text.slice(e.charIndex).match(/^\S+/) || [""])[0].length;
+    showHighlight(text, e.charIndex, len);
+  };
+  u.onend = u.onerror = endSpeech;
+  synth.speak(u);
+});
+$("pause").addEventListener("click", () => synth.pause());
+$("stop").addEventListener("click", () => { synth.cancel(); endSpeech(); });
+window.addEventListener("beforeunload", () => synth && synth.cancel());
+</script>
+</body>
+</html>
